@@ -1,0 +1,25 @@
+    1     0  0.0 13240 systemd
+    2     0  0.0     0 kthreadd
+   14     2  0.0     0 ksoftirqd/0
+   15     2  0.1     0 rcu_preempt
+  112     2  0.0     0 kworker/0:1H-kblockd
+  389     1  0.0 48212 systemd-journal
+  612     1  0.0  7680 systemd-logind
+  640     1  0.0  9216 sshd
+ 1021     1  0.0 10752 systemd
+ 1022  1021  0.0  3540 (sd-pam)
+ 1100  1021  2.4 298320 gnome-shell
+ 1188  1100  0.7 88064 Xwayland
+ 1402  1021  0.0  6272 tmux: server
+ 1403  1402  0.0  5376 bash
+ 1490  1403  0.0  5120 bash
+ 2001  1100  6.3 512404 firefox
+ 2077  2001  0.1 42112 Socket Process
+ 2081  2001  0.0 61248 Privileged Cont
+ 2120  2001  3.2 245760 Isolated Web Co
+ 2131  2001  0.8 131072 Isolated Web Co
+ 2140  2001  0.0 38912 Web Content
+ 2141  2001  0.0 38400 Web Content
+ 2302  1490  0.0     0 sh <defunct>
+ 2410  1490 12.5 1310720 java
+ 2499  1490  0.0  3968 ps
