@@ -28,17 +28,34 @@ go install github.com/dan2756/mtop@latest
 mtop                 # interactive view, refreshes every 2s
 mtop -n 1            # refresh every second
 mtop --json --top 5  # print the five busiest apps as JSON and exit
+mtop --sort mem      # start sorted by memory
 ```
 
 | Flag | Meaning |
 | --- | --- |
 | `-n`, `--interval DUR` | refresh interval: `2s`, `500ms`, or plain seconds (`0.5`); default `2s` |
 | `--json` | print one snapshot of the groups as JSON and exit |
-| `--top N` | only show the N busiest groups |
+| `--top N` | only show the first N groups |
+| `--sort KEY` | initial order: `cpu` (default), `mem`, `name` or `count` |
 | `--version` | print the version |
 
-Keys: `j`/`k` or the arrow keys move, `g`/`G` jump to the top/bottom,
-`q` or `ctrl-c` quits.
+## Keys
+
+| Key | Action |
+| --- | --- |
+| `j` / `k`, arrows | move the cursor |
+| `g` / `G`, PgUp / PgDn | jump to top / bottom, page |
+| `enter`, `e` | expand or collapse the selected app to show its processes |
+| `x` | send SIGTERM to every process of the selected app |
+| `X` | send SIGKILL to every process of the selected app |
+| `s` | cycle the sort order: cpu, mem, name, count |
+| `/` | filter apps by name; `enter` keeps the filter, `esc` clears it |
+| `q`, `ctrl-c` | quit |
+
+Killing is deliberately one key with no confirmation dialog. The status line
+tells you what happened, e.g. `sent SIGTERM to 14 processes of Google Chrome`.
+PID 0, PID 1 and mtop itself are never signalled, even when they are part of
+the selected group.
 
 ## How grouping works
 

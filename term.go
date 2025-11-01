@@ -18,9 +18,9 @@ const (
 	escHome         = "\x1b[H"
 	escClearScreen  = "\x1b[2J"
 	escClearLine    = "\x1b[K"
-	escClearBelow   = "\x1b[J"
 	escReset        = "\x1b[0m"
 	escBold         = "\x1b[1m"
+	escDim          = "\x1b[2m"
 	escReverse      = "\x1b[7m"
 )
 

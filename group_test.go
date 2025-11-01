@@ -148,20 +148,56 @@ func TestGroupLinuxFixture(t *testing.T) {
 	}
 }
 
-func TestSortByCPU(t *testing.T) {
-	groups := []Group{
-		{Key: "b", Name: "beta", CPU: 1},
-		{Key: "a", Name: "Alpha", CPU: 1},
-		{Key: "c", Name: "gamma", CPU: 5},
-		{Key: "d", Name: "delta", CPU: 1, RSS: 10},
-	}
-	sortByCPU(groups)
-	var got []string
+func groupNames(groups []Group) []string {
+	var names []string
 	for _, g := range groups {
-		got = append(got, g.Name)
+		names = append(names, g.Name)
 	}
-	want := []string{"gamma", "delta", "Alpha", "beta"}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("order = %v, want %v", got, want)
+	return names
+}
+
+func TestSortGroups(t *testing.T) {
+	procs := func(n int) []Process { return make([]Process, n) }
+	base := []Group{
+		{Key: "b", Name: "beta", CPU: 1, RSS: 300, Procs: procs(1)},
+		{Key: "a", Name: "Alpha", CPU: 1, RSS: 100, Procs: procs(3)},
+		{Key: "c", Name: "gamma", CPU: 5, RSS: 200, Procs: procs(1)},
+		{Key: "d", Name: "delta", CPU: 1, RSS: 100, Procs: procs(2)},
+	}
+	tests := []struct {
+		by   sortKey
+		want []string
+	}{
+		{sortCPU, []string{"gamma", "beta", "Alpha", "delta"}},
+		{sortMem, []string{"beta", "gamma", "Alpha", "delta"}},
+		{sortName, []string{"Alpha", "beta", "delta", "gamma"}},
+		{sortCount, []string{"Alpha", "delta", "gamma", "beta"}},
+	}
+	for _, tt := range tests {
+		groups := append([]Group(nil), base...)
+		sortGroups(groups, tt.by)
+		if got := groupNames(groups); !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("sort by %s = %v, want %v", tt.by, got, tt.want)
+		}
+	}
+}
+
+func TestSortKeys(t *testing.T) {
+	k := sortCPU
+	var seen []string
+	for range numSortKeys + 1 {
+		seen = append(seen, k.String())
+		k = k.next()
+	}
+	if want := []string{"cpu", "mem", "name", "count", "cpu"}; !reflect.DeepEqual(seen, want) {
+		t.Errorf("cycle = %v, want %v", seen, want)
+	}
+	for _, s := range []string{"cpu", "MEM", "name", "count"} {
+		if _, err := parseSortKey(s); err != nil {
+			t.Errorf("parseSortKey(%q): %v", s, err)
+		}
+	}
+	if _, err := parseSortKey("rss"); err == nil {
+		t.Error("parseSortKey(rss) should fail")
 	}
 }

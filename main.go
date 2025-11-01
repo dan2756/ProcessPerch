@@ -24,19 +24,28 @@ Usage:
 Flags:
   -n, --interval DUR   refresh every DUR, e.g. 2s, 500ms or plain seconds (default 2s)
       --json           print one snapshot of the groups as JSON and exit
-      --top N          only show the N busiest groups
+      --top N          only show the first N groups
+      --sort KEY       initial order: cpu, mem, name or count (default cpu)
   -h, --help           show this help
       --version        print the version and exit
 
 Keys:
-  j/k, arrows   move
+  j/k, arrows   move (g/G: top/bottom, PgUp/PgDn: page)
+  enter, e      expand/collapse the selected app
+  x             SIGTERM every process of the selected app
+  X             SIGKILL every process of the selected app
+  s             cycle sort: cpu, mem, name, count
+  /             filter by name (enter keeps it, esc clears it)
   q, ctrl-c     quit
+
+PID 0, PID 1 and mtop itself are never signalled.
 `
 
 type options struct {
 	interval time.Duration
 	json     bool
 	top      int
+	sort     sortKey
 	version  bool
 }
 
@@ -82,9 +91,14 @@ func parseFlags(args []string) (options, error) {
 	fs.Var(interval, "interval", "")
 	fs.BoolVar(&opts.json, "json", false, "")
 	fs.IntVar(&opts.top, "top", 0, "")
+	sortName := fs.String("sort", "cpu", "")
 	fs.BoolVar(&opts.version, "version", false, "")
 
 	if err := fs.Parse(args); err != nil {
+		return opts, err
+	}
+	var err error
+	if opts.sort, err = parseSortKey(*sortName); err != nil {
 		return opts, err
 	}
 	if fs.NArg() > 0 {
@@ -139,7 +153,7 @@ func printJSON(w io.Writer, opts options) error {
 		return err
 	}
 	groups := groupProcesses(procs)
-	sortByCPU(groups)
+	sortGroups(groups, opts.sort)
 	if opts.top > 0 && len(groups) > opts.top {
 		groups = groups[:opts.top]
 	}

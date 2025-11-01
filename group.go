@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"path"
 	"sort"
 	"strings"
@@ -115,10 +116,51 @@ func sortProcs(procs []Process) {
 	})
 }
 
-// sortByCPU orders groups by total CPU, then memory, then name.
-func sortByCPU(groups []Group) {
+// sortKey selects the group ordering.
+type sortKey int
+
+const (
+	sortCPU sortKey = iota
+	sortMem
+	sortName
+	sortCount
+	numSortKeys
+)
+
+var sortKeyNames = [numSortKeys]string{"cpu", "mem", "name", "count"}
+
+func (k sortKey) String() string { return sortKeyNames[k] }
+
+// next cycles cpu -> mem -> name -> count -> cpu.
+func (k sortKey) next() sortKey { return (k + 1) % numSortKeys }
+
+func parseSortKey(s string) (sortKey, error) {
+	for i, name := range sortKeyNames {
+		if strings.EqualFold(s, name) {
+			return sortKey(i), nil
+		}
+	}
+	return 0, fmt.Errorf("unknown sort key %q (want cpu, mem, name or count)", s)
+}
+
+// sortGroups orders groups by the given key, biggest first for the numeric
+// keys. Ties fall back to CPU, then memory, then name, so the order is stable
+// between refreshes.
+func sortGroups(groups []Group, by sortKey) {
 	sort.SliceStable(groups, func(i, j int) bool {
 		a, b := &groups[i], &groups[j]
+		switch by {
+		case sortName:
+			return lessName(a, b)
+		case sortMem:
+			if a.RSS != b.RSS {
+				return a.RSS > b.RSS
+			}
+		case sortCount:
+			if len(a.Procs) != len(b.Procs) {
+				return len(a.Procs) > len(b.Procs)
+			}
+		}
 		if a.CPU != b.CPU {
 			return a.CPU > b.CPU
 		}

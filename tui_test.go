@@ -2,8 +2,10 @@ package main
 
 import (
 	"errors"
+	"reflect"
 	"regexp"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -18,6 +20,10 @@ func testUI(t *testing.T, procs []Process) *ui {
 	t.Helper()
 	u := newUI(options{interval: 2 * time.Second})
 	u.snapshot = func() ([]Process, error) { return procs, nil }
+	u.kill = func(int, syscall.Signal) error {
+		t.Fatal("test tried to send a real signal")
+		return nil
+	}
 	u.now = func() time.Time { return time.Date(2025, 10, 25, 19, 38, 13, 0, time.UTC) }
 	u.refresh()
 	return u
@@ -48,7 +54,7 @@ func TestRenderDarwin(t *testing.T) {
 	if !strings.Contains(lines[1], "PROCS") || !strings.Contains(lines[1], "PIDS") {
 		t.Errorf("header = %q", lines[1])
 	}
-	if !strings.HasPrefix(lines[2], "> Google Chrome ") || !strings.Contains(lines[2], "   14   52.5 ") {
+	if !strings.HasPrefix(lines[2], ">▸ Google Chrome ") || !strings.Contains(lines[2], "   14   52.5  2.9G ") {
 		t.Errorf("first row = %q", lines[2])
 	}
 	if !strings.Contains(lines[2], " 706 701 640 612 ") {
@@ -87,7 +93,7 @@ func TestCursorMovement(t *testing.T) {
 	lines := screen(u, 100, 12)
 	found := false
 	for _, l := range lines {
-		if strings.HasPrefix(l, "> ") {
+		if strings.HasPrefix(l, ">") {
 			found = true
 		}
 	}
@@ -117,7 +123,7 @@ func TestSnapshotErrorKeepsLastGroups(t *testing.T) {
 	u.snapshot = func() ([]Process, error) { return nil, errors.New("ps: exit status 1") }
 	u.refresh()
 	lines := screen(u, 100, 12)
-	if !strings.HasPrefix(lines[2], "> Google Chrome") {
+	if !strings.HasPrefix(lines[2], ">▸ Google Chrome") {
 		t.Errorf("groups dropped after error: %q", lines[2])
 	}
 	if last := lines[len(lines)-1]; last != "error: ps: exit status 1" {
@@ -133,5 +139,163 @@ func TestRenderTinyTerminal(t *testing.T) {
 				t.Errorf("%dx%d: line too wide: %q", size[0], size[1], l)
 			}
 		}
+	}
+}
+
+// press feeds raw terminal input to the ui.
+func press(t *testing.T, u *ui, s string) {
+	t.Helper()
+	for _, k := range parseKeys([]byte(s)) {
+		if u.handleKey(k) {
+			t.Fatalf("unexpected quit on %q", s)
+		}
+	}
+}
+
+func TestExpandGroup(t *testing.T) {
+	u := testUI(t, loadFixture(t, "ps_darwin.txt"))
+	press(t, u, "\r")
+	lines := screen(u, 120, 30)
+	if !strings.HasPrefix(lines[2], ">▾ Google Chrome ") {
+		t.Fatalf("group row = %q", lines[2])
+	}
+	if !strings.Contains(lines[3], "  Google Chrome Helper (Renderer)") || !strings.HasSuffix(lines[3], "  706") {
+		t.Errorf("first child = %q", lines[3])
+	}
+	if !strings.Contains(lines[16], "chrome_crashpad_handler") {
+		t.Errorf("last child = %q", lines[16])
+	}
+	if !strings.HasPrefix(lines[17], " ▸ Docker ") {
+		t.Errorf("row after children = %q", lines[17])
+	}
+
+	// The cursor stays on group rows: j skips over the children.
+	press(t, u, "j")
+	if g := u.selected(); g == nil || g.Name != "Docker" {
+		t.Errorf("selected after j = %+v", g)
+	}
+	press(t, u, "ke")
+	if lines := screen(u, 120, 30); !strings.HasPrefix(lines[3], " ▸ Docker") {
+		t.Errorf("after collapse row 3 = %q", lines[3])
+	}
+}
+
+func TestFilter(t *testing.T) {
+	u := testUI(t, loadFixture(t, "ps_darwin.txt"))
+	press(t, u, "/studio")
+	if !u.filtering {
+		t.Fatal("not in filter mode")
+	}
+	if got := groupNames(u.visible()); !reflect.DeepEqual(got, []string{"Visual Studio Code"}) {
+		t.Errorf("visible = %v", got)
+	}
+	lines := screen(u, 100, 12)
+	if last := lines[len(lines)-1]; last != "/studio " {
+		t.Errorf("prompt = %q", last)
+	}
+
+	// Typed letters go to the prompt, not to the key bindings.
+	press(t, u, strings.Repeat("\x7f", 6)+"xq")
+	if u.filter != "xq" {
+		t.Errorf("filter = %q", u.filter)
+	}
+	press(t, u, "\x7f\x7fCODE\r")
+	if u.filtering || u.filter != "CODE" {
+		t.Errorf("after enter: filtering=%v filter=%q", u.filtering, u.filter)
+	}
+	if got := groupNames(u.visible()); !reflect.DeepEqual(got, []string{"Visual Studio Code", "Xcode"}) {
+		t.Errorf("case-insensitive match = %v", got)
+	}
+	if !strings.Contains(screen(u, 120, 12)[0], `filter "CODE"`) {
+		t.Error("title does not show the active filter")
+	}
+	press(t, u, "\x1b")
+	if u.filter != "" || len(u.visible()) != len(u.groups) {
+		t.Errorf("esc did not clear the filter")
+	}
+
+	press(t, u, "/zzz")
+	if lines := screen(u, 100, 12); !strings.Contains(lines[2], `no app matches "zzz"`) {
+		t.Errorf("empty filter row = %q", lines[2])
+	}
+	press(t, u, "\x1b")
+	if u.filtering || u.filter != "" {
+		t.Error("esc in prompt should cancel")
+	}
+}
+
+func TestSortCycle(t *testing.T) {
+	u := testUI(t, loadFixture(t, "ps_darwin.txt"))
+	press(t, u, "s")
+	if u.sort != sortMem || u.visible()[0].Name != "Google Chrome" || u.visible()[1].Name != "Docker" {
+		t.Errorf("sort %s: %v", u.sort, groupNames(u.visible()[:3]))
+	}
+	press(t, u, "s")
+	if u.sort != sortName || u.visible()[0].Name != "1Password" {
+		t.Errorf("sort %s: %v", u.sort, groupNames(u.visible()[:3]))
+	}
+	press(t, u, "s")
+	if u.sort != sortCount || u.visible()[0].Name != "Google Chrome" || u.visible()[1].Name != "Visual Studio Code" {
+		t.Errorf("sort %s: %v", u.sort, groupNames(u.visible()[:3]))
+	}
+	press(t, u, "s")
+	if u.sort != sortCPU {
+		t.Errorf("sort did not wrap around: %s", u.sort)
+	}
+	if last := screen(u, 100, 12)[11]; last != "sorted by cpu" {
+		t.Errorf("status = %q", last)
+	}
+}
+
+func TestKillSelectedGroup(t *testing.T) {
+	u := testUI(t, loadFixture(t, "ps_darwin.txt"))
+	var sent []int
+	var sig syscall.Signal
+	u.kill = func(pid int, s syscall.Signal) error {
+		sent = append(sent, pid)
+		sig = s
+		return nil
+	}
+	press(t, u, "x")
+	if len(sent) != 14 || sig != syscall.SIGTERM {
+		t.Fatalf("sent %v to %v", sig, sent)
+	}
+	if !u.refreshSoon {
+		t.Error("kill should ask for an early refresh")
+	}
+	lines := screen(u, 100, 12)
+	if last := lines[len(lines)-1]; last != "sent SIGTERM to 14 processes of Google Chrome" {
+		t.Errorf("status = %q", last)
+	}
+
+	// The status line goes back to the key help after a while.
+	u.now = func() time.Time { return time.Date(2025, 10, 25, 19, 38, 30, 0, time.UTC) }
+	if last := screen(u, 100, 12)[11]; last != keyHelp {
+		t.Errorf("status after timeout = %q", last)
+	}
+}
+
+func TestKillRefusesProtected(t *testing.T) {
+	u := testUI(t, loadFixture(t, "ps_darwin.txt"))
+	u.kill = func(pid int, _ syscall.Signal) error {
+		t.Errorf("signalled protected pid %d", pid)
+		return nil
+	}
+	for _, name := range []string{"launchd", "kernel_task"} {
+		press(t, u, "/"+name+"\r")
+		if g := u.selected(); g == nil || g.Name != name {
+			t.Fatalf("selected %+v, want %s", g, name)
+		}
+		press(t, u, "X")
+		if !strings.HasPrefix(u.status, "refusing to signal "+name) {
+			t.Errorf("status = %q", u.status)
+		}
+		press(t, u, "\x1b")
+	}
+
+	u.self = 1650 // pretend we are the mtop process in the fixture
+	press(t, u, "/mtop\rx")
+	if !strings.HasPrefix(u.status, "refusing to signal mtop") {
+		t.Errorf("status = %q", u.status)
 	}
 }
