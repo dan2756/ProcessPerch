@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -26,6 +27,10 @@ type ui struct {
 	kill     func(pid int, sig syscall.Signal) error
 	self     int // our own PID, never signalled
 
+	hooks    *hookSet
+	runHook  func(firing) error
+	hookDone chan hookResult
+
 	nprocs int
 	groups []Group // sorted
 	err    error   // last snapshot error, shown until the next good one
@@ -46,7 +51,7 @@ type ui struct {
 }
 
 func newUI(opts options) *ui {
-	return &ui{
+	u := &ui{
 		interval: opts.interval,
 		top:      opts.top,
 		sort:     opts.sort,
@@ -54,9 +59,17 @@ func newUI(opts options) *ui {
 		now:      time.Now,
 		kill:     syscall.Kill,
 		self:     os.Getpid(),
+		hooks:    newHookSet(opts.hooks, opts.cooldown),
+		hookDone: make(chan hookResult, 16),
 		bodyH:    20,
 		expanded: make(map[string]bool),
 	}
+	// Hook output would scribble over the screen, so it is dropped here;
+	// use --watch to see it.
+	u.runHook = func(f firing) error {
+		return startHook(f, io.Discard, io.Discard, u.hookDone)
+	}
+	return u
 }
 
 func runTUI(opts options) error {
@@ -97,6 +110,10 @@ func runTUI(opts options) error {
 			u.refresh()
 		case <-tick.C:
 			u.refresh()
+		case r := <-u.hookDone:
+			if r.err != nil {
+				u.setStatus("hook %s for %s failed: %v", r.firing.hook.cond, r.firing.group.Name, r.err)
+			}
 		case sig := <-sigs:
 			if sig != syscall.SIGWINCH {
 				return nil
@@ -118,6 +135,14 @@ func (u *ui) refresh() {
 	u.groups = groupProcesses(procs)
 	sortGroups(u.groups, u.sort)
 	u.clampCursor()
+
+	for _, f := range u.hooks.check(u.groups, u.now()) {
+		if err := u.runHook(f); err != nil {
+			u.setStatus("hook %s for %s failed to start: %v", f.hook.cond, f.group.Name, err)
+		} else {
+			u.setStatus("%s", f)
+		}
+	}
 }
 
 // visible returns the groups currently on screen: filtered by name, then
@@ -384,6 +409,9 @@ func (u *ui) titleLine(width, shown int) string {
 	left := fmt.Sprintf("mtop  %d %s in %d %s  sort %s  every %s",
 		u.nprocs, plural(u.nprocs, "process", "processes"),
 		shown, plural(shown, "group", "groups"), u.sort, u.interval)
+	if n := len(u.hooks.hooks); n > 0 {
+		left += fmt.Sprintf("  %d %s", n, plural(n, "hook", "hooks"))
+	}
 	if u.filter != "" && !u.filtering {
 		left += fmt.Sprintf("  filter %q", u.filter)
 	}

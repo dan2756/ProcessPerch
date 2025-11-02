@@ -28,6 +28,26 @@ func formatBytes(n uint64) string {
 	panic("unreachable")
 }
 
+// parseBytes parses a size such as 2G, 1.5GB, 512MiB, 800k or a plain byte
+// count. Units are binary (1K = 1024 bytes).
+func parseBytes(s string) (uint64, error) {
+	t := strings.ToUpper(strings.TrimSpace(s))
+	t = strings.TrimSuffix(t, "IB")
+	t = strings.TrimSuffix(t, "B")
+	mult := 1.0
+	if n := len(t); n > 0 {
+		if i := strings.IndexByte("KMGTPE", t[n-1]); i >= 0 {
+			mult = math.Pow(1024, float64(i+1))
+			t = t[:n-1]
+		}
+	}
+	v, err := strconv.ParseFloat(strings.TrimSpace(t), 64)
+	if err != nil || v < 0 || math.IsNaN(v) || math.IsInf(v, 0) || v*mult >= math.MaxInt64 {
+		return 0, fmt.Errorf("invalid size %q", s)
+	}
+	return uint64(v * mult), nil
+}
+
 func roundTenth(v float64) float64 {
 	return math.Round(v*10) / 10
 }

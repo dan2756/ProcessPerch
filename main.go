@@ -10,24 +10,43 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
 // version is overridden at build time with -ldflags "-X main.version=...".
-var version = "0.1.0"
+var version = "0.2.0"
 
 const usageText = `mtop - processes grouped by the app that owns them
 
 Usage:
   mtop [flags]
+  mtop --json [--top N] [--sort KEY]
+  mtop --watch --hook SPEC [--hook SPEC ...]
 
 Flags:
-  -n, --interval DUR   refresh every DUR, e.g. 2s, 500ms or plain seconds (default 2s)
-      --json           print one snapshot of the groups as JSON and exit
-      --top N          only show the first N groups
-      --sort KEY       initial order: cpu, mem, name or count (default cpu)
-  -h, --help           show this help
-      --version        print the version and exit
+  -n, --interval DUR     refresh every DUR, e.g. 2s, 500ms or plain seconds (default 2s)
+      --json             print one snapshot of the groups as JSON and exit
+      --top N            only show the first N groups
+      --sort KEY         initial order: cpu, mem, name or count (default cpu)
+      --hook SPEC        run a command when an app crosses a threshold (repeatable)
+      --hook-cooldown DUR
+                         fire a hook at most once per DUR for each app (default 5m)
+      --watch            no UI: check hooks every interval and log firings to stderr
+  -h, --help             show this help
+      --version          print the version and exit
+
+Hooks:
+  SPEC is METRIC>VALUE:COMMAND (or >=), where METRIC is cpu (percent of one
+  core), mem (bytes; K, M, G, T suffixes) or count (processes):
+
+    --hook 'cpu>80:say "$MTOP_APP is hot"'
+    --hook 'mem>2G:osascript -e "display notification \"$MTOP_APP\""'
+    --hook 'count>50:echo "$MTOP_APP runs $MTOP_COUNT processes" >> ~/mtop.log'
+
+  A hook fires once when an app goes over the threshold and re-arms when it
+  drops back under. COMMAND runs with sh -c and gets MTOP_APP, MTOP_CPU,
+  MTOP_MEM_BYTES, MTOP_COUNT, MTOP_PIDS and MTOP_HOOK in its environment.
 
 Keys:
   j/k, arrows   move (g/G: top/bottom, PgUp/PgDn: page)
@@ -46,6 +65,9 @@ type options struct {
 	json     bool
 	top      int
 	sort     sortKey
+	hooks    []hook
+	cooldown time.Duration
+	watch    bool
 	version  bool
 }
 
@@ -68,9 +90,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	if opts.json {
+	switch {
+	case opts.json:
 		err = printJSON(stdout, opts)
-	} else {
+	case opts.watch:
+		err = runWatch(opts, stdout, stderr)
+	default:
 		err = runTUI(opts)
 	}
 	if err != nil {
@@ -81,7 +106,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 func parseFlags(args []string) (options, error) {
-	opts := options{interval: 2 * time.Second}
+	opts := options{interval: 2 * time.Second, cooldown: 5 * time.Minute}
 
 	fs := flag.NewFlagSet("mtop", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -92,6 +117,10 @@ func parseFlags(args []string) (options, error) {
 	fs.BoolVar(&opts.json, "json", false, "")
 	fs.IntVar(&opts.top, "top", 0, "")
 	sortName := fs.String("sort", "cpu", "")
+	var hookSpecs stringList
+	fs.Var(&hookSpecs, "hook", "")
+	fs.Var(durationFlag{&opts.cooldown}, "hook-cooldown", "")
+	fs.BoolVar(&opts.watch, "watch", false, "")
 	fs.BoolVar(&opts.version, "version", false, "")
 
 	if err := fs.Parse(args); err != nil {
@@ -110,7 +139,33 @@ func parseFlags(args []string) (options, error) {
 	if opts.top < 0 {
 		return opts, fmt.Errorf("--top must not be negative")
 	}
+	if opts.cooldown < 0 {
+		return opts, fmt.Errorf("--hook-cooldown must not be negative")
+	}
+	for _, spec := range hookSpecs {
+		h, err := parseHook(spec)
+		if err != nil {
+			return opts, err
+		}
+		opts.hooks = append(opts.hooks, h)
+	}
+	if opts.json && opts.watch {
+		return opts, fmt.Errorf("--json and --watch cannot be combined")
+	}
+	if opts.watch && len(opts.hooks) == 0 {
+		return opts, fmt.Errorf("--watch needs at least one --hook")
+	}
 	return opts, nil
+}
+
+// stringList collects a repeatable string flag.
+type stringList []string
+
+func (l *stringList) String() string { return strings.Join(*l, ", ") }
+
+func (l *stringList) Set(s string) error {
+	*l = append(*l, s)
+	return nil
 }
 
 // durationFlag accepts Go durations ("1.5s", "500ms") as well as plain

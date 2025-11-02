@@ -299,3 +299,27 @@ func TestKillRefusesProtected(t *testing.T) {
 		t.Errorf("status = %q", u.status)
 	}
 }
+
+func TestHooksFireFromTUI(t *testing.T) {
+	procs := loadFixture(t, "ps_darwin.txt")
+	u := newUI(options{interval: 2 * time.Second, hooks: []hook{mustHook(t, "mem>2G:say big")}, cooldown: time.Minute})
+	u.snapshot = func() ([]Process, error) { return procs, nil }
+	u.now = func() time.Time { return time.Date(2025, 11, 2, 22, 32, 27, 0, time.UTC) }
+	var fired []string
+	u.runHook = func(f firing) error {
+		fired = append(fired, f.group.Name)
+		return nil
+	}
+	u.refresh()
+	u.refresh()
+	if want := []string{"Google Chrome", "Docker"}; !reflect.DeepEqual(fired, want) {
+		t.Errorf("fired %v, want %v", fired, want)
+	}
+	lines := screen(u, 120, 12)
+	if !strings.Contains(lines[0], "  1 hook") {
+		t.Errorf("title = %q", lines[0])
+	}
+	if last := lines[11]; last != "hook mem>2G fired for Docker (cpu 16.8%, mem 2.4G, 4 processes)" {
+		t.Errorf("status = %q", last)
+	}
+}
