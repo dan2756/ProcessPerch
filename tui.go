@@ -35,9 +35,10 @@ type ui struct {
 	groups []Group // sorted
 	err    error   // last snapshot error, shown until the next good one
 
-	cursor    int // index into visible()
-	offset    int // first body row on screen
-	bodyH     int // body rows in the last frame, for paging
+	cursor    int    // index into visible()
+	selKey    string // key of the group under the cursor
+	offset    int    // first body row on screen
+	bodyH     int    // body rows in the last frame, for paging
 	expanded  map[string]bool
 	filter    string
 	filtering bool // typing into the filter prompt
@@ -134,7 +135,7 @@ func (u *ui) refresh() {
 	u.nprocs = len(procs)
 	u.groups = groupProcesses(procs)
 	sortGroups(u.groups, u.sort)
-	u.clampCursor()
+	u.follow()
 
 	for _, f := range u.hooks.check(u.groups, u.now()) {
 		if err := u.runHook(f); err != nil {
@@ -173,14 +174,29 @@ func (u *ui) selected() *Group {
 	return &vis[u.cursor]
 }
 
-func (u *ui) clampCursor() {
-	n := len(u.visible())
-	if u.cursor >= n {
-		u.cursor = n - 1
+// moveTo puts the cursor on row i of the visible groups, clamped.
+func (u *ui) moveTo(i int) {
+	vis := u.visible()
+	u.cursor = max(0, min(i, len(vis)-1))
+	u.selKey = ""
+	if len(vis) > 0 {
+		u.selKey = vis[u.cursor].Key
 	}
-	if u.cursor < 0 {
-		u.cursor = 0
+}
+
+// follow keeps the cursor on the same app after the list changes under it
+// (a refresh, a new sort order, a cleared filter). Sorting by CPU reorders
+// rows on almost every refresh, and x acts on whatever is selected, so the
+// selection must not silently slide onto a neighbour. If the app is gone the
+// cursor keeps its position.
+func (u *ui) follow() {
+	for i, g := range u.visible() {
+		if g.Key == u.selKey {
+			u.cursor = i
+			return
+		}
 	}
+	u.moveTo(u.cursor)
 }
 
 func (u *ui) setStatus(format string, args ...any) {
@@ -200,30 +216,31 @@ func (u *ui) handleKey(k key) (quit bool) {
 		u.toggleExpanded()
 	case keyEsc:
 		u.filter = ""
+		u.follow()
 	case keyUp:
-		u.cursor--
+		u.moveTo(u.cursor - 1)
 	case keyDown:
-		u.cursor++
+		u.moveTo(u.cursor + 1)
 	case keyPageUp:
-		u.cursor -= u.bodyH
+		u.moveTo(u.cursor - u.bodyH)
 	case keyPageDown:
-		u.cursor += u.bodyH
+		u.moveTo(u.cursor + u.bodyH)
 	case keyHome:
-		u.cursor = 0
+		u.moveTo(0)
 	case keyEnd:
-		u.cursor = len(u.visible()) - 1
+		u.moveTo(len(u.visible()) - 1)
 	case keyRune:
 		switch k.r {
 		case 'q':
 			return true
 		case 'j':
-			u.cursor++
+			u.moveTo(u.cursor + 1)
 		case 'k':
-			u.cursor--
+			u.moveTo(u.cursor - 1)
 		case 'g':
-			u.cursor = 0
+			u.moveTo(0)
 		case 'G':
-			u.cursor = len(u.visible()) - 1
+			u.moveTo(len(u.visible()) - 1)
 		case 'e':
 			u.toggleExpanded()
 		case 'x':
@@ -233,12 +250,12 @@ func (u *ui) handleKey(k key) (quit bool) {
 		case 's':
 			u.sort = u.sort.next()
 			sortGroups(u.groups, u.sort)
+			u.follow()
 			u.setStatus("sorted by %s", u.sort)
 		case '/':
 			u.filtering = true
 		}
 	}
-	u.clampCursor()
 	return false
 }
 
@@ -261,10 +278,14 @@ func (u *ui) handleFilterKey(k key) bool {
 	case keyEsc:
 		u.filtering = false
 		u.filter = ""
+		u.follow()
+		return true
 	default:
 		return false
 	}
-	u.cursor, u.offset = 0, 0
+	// Each edit jumps to the best match.
+	u.offset = 0
+	u.moveTo(0)
 	return true
 }
 

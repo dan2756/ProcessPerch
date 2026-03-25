@@ -323,3 +323,60 @@ func TestHooksFireFromTUI(t *testing.T) {
 		t.Errorf("status = %q", last)
 	}
 }
+
+func TestCursorFollowsAppAcrossRefreshes(t *testing.T) {
+	procs := []Process{
+		{PID: 10, CPU: 50, Comm: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"},
+		{PID: 20, CPU: 30, Comm: "/Applications/Slack.app/Contents/MacOS/Slack"},
+		{PID: 30, CPU: 10, Comm: "/Applications/Safari.app/Contents/MacOS/Safari"},
+	}
+	u := testUI(t, procs)
+	var sent []int
+	u.kill = func(pid int, _ syscall.Signal) error {
+		sent = append(sent, pid)
+		return nil
+	}
+	press(t, u, "j")
+	if g := u.selected(); g.Name != "Slack" {
+		t.Fatalf("selected %s, want Slack", g.Name)
+	}
+
+	// Safari gets busy and Slack drops to the bottom of the CPU order.
+	procs[1].CPU, procs[2].CPU = 1, 90
+	u.refresh()
+	if got := groupNames(u.visible()); !reflect.DeepEqual(got, []string{"Safari", "Google Chrome", "Slack"}) {
+		t.Fatalf("order = %v", got)
+	}
+	if g := u.selected(); g.Name != "Slack" || u.cursor != 2 {
+		t.Errorf("cursor moved to %s (row %d), want Slack", g.Name, u.cursor)
+	}
+	press(t, u, "x")
+	if !reflect.DeepEqual(sent, []int{20}) {
+		t.Errorf("x signalled %v, want Slack's pid 20", sent)
+	}
+
+	// Changing the sort order keeps the selection too.
+	press(t, u, "s") // mem: all zero, so CPU order
+	press(t, u, "s") // name
+	if g := u.selected(); g.Name != "Slack" || u.cursor != 2 {
+		t.Errorf("after sort by name: %s at row %d", g.Name, u.cursor)
+	}
+
+	// Clearing a filter keeps the app that was found.
+	press(t, u, "/chr\r")
+	press(t, u, "\x1b")
+	if g := u.selected(); g.Name != "Google Chrome" {
+		t.Errorf("after clearing filter: %s", g.Name)
+	}
+
+	// When the selected app quits, the cursor stays where it was.
+	press(t, u, "gj")
+	if g := u.selected(); g.Name != "Safari" {
+		t.Fatalf("selected %s, want Safari", g.Name)
+	}
+	u.snapshot = func() ([]Process, error) { return procs[:2], nil }
+	u.refresh()
+	if g := u.selected(); g == nil || g.Name != "Slack" || u.cursor != 1 {
+		t.Errorf("after Safari quit: %+v at row %d", g, u.cursor)
+	}
+}
