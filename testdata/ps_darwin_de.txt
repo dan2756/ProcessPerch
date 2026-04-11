@@ -1,0 +1,9 @@
+    1     0   0,2  14880 /sbin/launchd
+  160     1   9,8 286720 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+  612     1   4,2 412336 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+  706   612  21,7 734208 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/141.0.7390.108/Helpers/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)
+ 1204     1   1,8 201344 /Applications/Visual Studio Code.app/Contents/MacOS/Electron
+ 1215  1204   6,5 389120 /Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Renderer).app/Contents/MacOS/Code Helper (Renderer)
+ 2130  2101 114,8 2097152 /Applications/Docker.app/Contents/MacOS/com.docker.virtualization
+ 2840     1   0,3  61440 /Applications/Übersicht.app/Contents/MacOS/Übersicht
+ 2851  2840   0,0  30720 /Applications/Übersicht.app/Contents/Frameworks/Übersicht Helper.app/Contents/MacOS/Übersicht Helper

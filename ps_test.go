@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -146,5 +147,63 @@ func TestParsePSAllBad(t *testing.T) {
 	procs, err := parsePS(strings.NewReader(""))
 	if err != nil || len(procs) != 0 {
 		t.Fatalf("empty input: %v, %v", procs, err)
+	}
+}
+
+func TestParsePSDecimalComma(t *testing.T) {
+	// Captured with LANG=de_DE.UTF-8, before ps was run with LC_NUMERIC=C.
+	procs := loadFixture(t, "ps_darwin_de.txt")
+	if len(procs) != 9 {
+		t.Fatalf("parsed %d processes, want 9", len(procs))
+	}
+	groups := groupProcesses(procs)
+	for name, cpu := range map[string]float64{
+		"Google Chrome":      25.9,
+		"Visual Studio Code": 8.3,
+		"Docker":             114.8,
+		"Übersicht":          0.3,
+	} {
+		g := findGroup(groups, name)
+		if g == nil || g.CPU != cpu {
+			t.Errorf("group %q = %+v, want cpu %.1f", name, g, cpu)
+		}
+	}
+}
+
+func TestPSEnv(t *testing.T) {
+	tests := []struct {
+		in, want []string
+	}{
+		{[]string{"HOME=/Users/dj", "LANG=de_DE.UTF-8"},
+			[]string{"HOME=/Users/dj", "LANG=de_DE.UTF-8", "LC_NUMERIC=C"}},
+		{[]string{"LC_NUMERIC=de_DE.UTF-8", "LC_CTYPE=UTF-8"},
+			[]string{"LC_CTYPE=UTF-8", "LC_NUMERIC=C"}},
+		{[]string{"LC_ALL=de_DE.UTF-8", "LC_CTYPE=C", "PATH=/usr/bin"},
+			[]string{"PATH=/usr/bin", "LC_CTYPE=de_DE.UTF-8", "LC_NUMERIC=C"}},
+	}
+	for _, tt := range tests {
+		if got := psEnv(tt.in); !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("psEnv(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestListProcessesLeavesOutItsOwnPS(t *testing.T) {
+	procs, err := listProcesses()
+	if err != nil {
+		t.Skip("ps not usable here:", err)
+	}
+	self := os.Getpid()
+	foundSelf := false
+	for _, p := range procs {
+		if p.PID == self {
+			foundSelf = true
+		}
+		if p.PPID == self && processName(p.Comm) == "ps" {
+			t.Errorf("snapshot includes our own ps: %+v", p)
+		}
+	}
+	if !foundSelf {
+		t.Errorf("snapshot of %d processes does not include the test binary (pid %d)", len(procs), self)
 	}
 }

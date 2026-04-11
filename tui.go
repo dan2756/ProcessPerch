@@ -8,7 +8,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"unicode/utf8"
 )
 
 // statusTTL is how long a status message stays up before the key help
@@ -266,8 +265,9 @@ func (u *ui) handleFilterKey(k key) bool {
 	case keyRune:
 		u.filter += string(k.r)
 	case keyBackspace:
+		// Only enter and esc leave the prompt: leaving on one backspace
+		// too many would turn the next letters typed into commands.
 		if u.filter == "" {
-			u.filtering = false
 			return true
 		}
 		r := []rune(u.filter)
@@ -325,10 +325,10 @@ func (u *ui) layout(width int, groups []Group) layout {
 	fixed := prefixW + 1 + countW + 1 + cpuW + 1 + memW + 2
 	nameW := 12
 	for _, g := range groups {
-		nameW = max(nameW, utf8.RuneCountInString(g.Name))
+		nameW = max(nameW, displayWidth(g.Name))
 		if u.expanded[g.Key] {
 			for _, p := range g.Procs {
-				nameW = max(nameW, 2+utf8.RuneCountInString(processName(p.Comm)))
+				nameW = max(nameW, 2+displayWidth(processName(p.Comm)))
 			}
 		}
 	}
@@ -358,7 +358,10 @@ func (u *ui) render(width, height int) string {
 
 func (u *ui) lines(width, height int) []string {
 	if width < 20 || height < 4 {
-		return []string{truncate("mtop: terminal too small", width)}
+		// One line per row, so render clears what the last frame left.
+		out := make([]string, max(1, height))
+		out[0] = truncate("mtop: terminal too small", width)
+		return out
 	}
 	vis := u.visible()
 	lay := u.layout(width, vis)
@@ -400,7 +403,7 @@ func (u *ui) lines(width, height int) []string {
 	}
 	if len(vis) == 0 && u.err == nil {
 		if u.filter != "" {
-			out = append(out, fmt.Sprintf("%*sno app matches %q", prefixW, "", u.filter))
+			out = append(out, truncate(fmt.Sprintf("%*sno app matches %q", prefixW, "", u.filter), width))
 		} else {
 			out = append(out, fmt.Sprintf("%*sno processes", prefixW, ""))
 		}
@@ -437,7 +440,7 @@ func (u *ui) titleLine(width, shown int) string {
 		left += fmt.Sprintf("  filter %q", u.filter)
 	}
 	right := u.now().Format("15:04:05")
-	gap := width - utf8.RuneCountInString(left) - len(right)
+	gap := width - displayWidth(left) - len(right)
 	if gap < 1 {
 		return escBold + truncate(left, width) + escReset
 	}

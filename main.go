@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -15,7 +16,7 @@ import (
 )
 
 // version is overridden at build time with -ldflags "-X main.version=...".
-var version = "0.2.1"
+var version = "0.2.2"
 
 const usageText = `mtop - processes grouped by the app that owns them
 
@@ -181,7 +182,13 @@ func (f durationFlag) String() string {
 
 func (f durationFlag) Set(s string) error {
 	if secs, err := strconv.ParseFloat(s, 64); err == nil {
-		*f.d = time.Duration(secs * float64(time.Second))
+		// Round rather than truncate, so 4.1 is 4.1s and not 4.099999999s,
+		// and reject what does not fit in a Duration (including inf and NaN).
+		ns := math.Round(secs * float64(time.Second))
+		if math.IsNaN(ns) || ns >= math.MaxInt64 || ns < math.MinInt64 {
+			return fmt.Errorf("duration %q is out of range", s)
+		}
+		*f.d = time.Duration(ns)
 		return nil
 	}
 	d, err := time.ParseDuration(s)

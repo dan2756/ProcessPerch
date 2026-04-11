@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -25,9 +26,12 @@ type Process struct {
 // only column that can contain spaces.
 var psArgs = []string{"-axww", "-o", "pid=,ppid=,pcpu=,rss=,comm="}
 
-// listProcesses takes one snapshot of the process table.
+// listProcesses takes one snapshot of the process table. The ps process
+// itself is left out: it is ours and gone by the time anyone looks.
 func listProcesses() ([]Process, error) {
-	out, err := exec.Command("ps", psArgs...).Output()
+	cmd := exec.Command("ps", psArgs...)
+	cmd.Env = psEnv(os.Environ())
+	out, err := cmd.Output()
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
@@ -35,7 +39,51 @@ func listProcesses() ([]Process, error) {
 		}
 		return nil, fmt.Errorf("ps: %w", err)
 	}
-	return parsePS(bytes.NewReader(out))
+	procs, err := parsePS(bytes.NewReader(out))
+	if err != nil {
+		return nil, err
+	}
+	return withoutPID(procs, cmd.Process.Pid), nil
+}
+
+// psEnv forces C number formatting for ps. The BSD ps on macOS honours
+// LC_NUMERIC, so under a German locale %cpu comes out as "12,5". Only the
+// numeric category is overridden: with LC_ALL=C, ps would also stop
+// printing non-ASCII app names ("Übersicht") as-is.
+func psEnv(env []string) []string {
+	var all string
+	out := make([]string, 0, len(env)+2)
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, "LC_ALL="); ok {
+			all = v
+			continue
+		}
+		if !strings.HasPrefix(kv, "LC_NUMERIC=") {
+			out = append(out, kv)
+		}
+	}
+	if all != "" {
+		// LC_ALL beats every LC_* variable, so it has to go; hand its
+		// value to LC_CTYPE, the category that decides how names print.
+		kept := out[:0]
+		for _, kv := range out {
+			if !strings.HasPrefix(kv, "LC_CTYPE=") {
+				kept = append(kept, kv)
+			}
+		}
+		out = append(kept, "LC_CTYPE="+all)
+	}
+	return append(out, "LC_NUMERIC=C")
+}
+
+func withoutPID(procs []Process, pid int) []Process {
+	out := procs[:0]
+	for _, p := range procs {
+		if p.PID != pid {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // parsePS parses the output of ps -o pid=,ppid=,pcpu=,rss=,comm=.
@@ -104,7 +152,9 @@ func parsePSLine(line string) (Process, error) {
 	if err != nil || ppid < 0 {
 		return Process{}, fmt.Errorf("bad ppid %q", fields[1])
 	}
-	cpu, err := strconv.ParseFloat(fields[2], 64)
+	// Accept a decimal comma too, in case ps ignored LC_NUMERIC or the
+	// output was captured elsewhere.
+	cpu, err := strconv.ParseFloat(strings.Replace(fields[2], ",", ".", 1), 64)
 	if err != nil || cpu < 0 {
 		return Process{}, fmt.Errorf("bad %%cpu %q", fields[2])
 	}

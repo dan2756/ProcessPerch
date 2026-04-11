@@ -5,7 +5,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
-	"unicode/utf8"
+	"unicode"
 )
 
 // formatBytes renders a byte count in short binary units: 512K, 14M, 1.2G.
@@ -64,23 +64,79 @@ func joinPIDs(pids []int, sep string) string {
 	return b.String()
 }
 
-// truncate shortens s to at most n runes, marking the cut with an ellipsis.
+// wide holds the East Asian wide and fullwidth ranges, which take two
+// terminal columns: CJK, kana, Hangul, fullwidth forms and the common emoji
+// blocks.
+var wide = &unicode.RangeTable{
+	R16: []unicode.Range16{
+		{0x1100, 0x115f, 1},
+		{0x2329, 0x232a, 1},
+		{0x2e80, 0x303e, 1},
+		{0x3041, 0x33ff, 1},
+		{0x3400, 0x4dbf, 1},
+		{0x4e00, 0x9fff, 1},
+		{0xa000, 0xa4cf, 1},
+		{0xa960, 0xa97f, 1},
+		{0xac00, 0xd7a3, 1},
+		{0xf900, 0xfaff, 1},
+		{0xfe10, 0xfe19, 1},
+		{0xfe30, 0xfe6f, 1},
+		{0xff00, 0xff60, 1},
+		{0xffe0, 0xffe6, 1},
+	},
+	R32: []unicode.Range32{
+		{0x1f300, 0x1f64f, 1},
+		{0x1f900, 0x1f9ff, 1},
+		{0x20000, 0x2fffd, 1},
+		{0x30000, 0x3fffd, 1},
+	},
+}
+
+// runeWidth is the number of terminal columns r takes up. Combining marks
+// (as in the decomposed file names macOS often uses) and other zero-width
+// characters take none.
+func runeWidth(r rune) int {
+	switch {
+	case unicode.In(r, unicode.Mn, unicode.Me, unicode.Cf):
+		return 0
+	case unicode.Is(wide, r):
+		return 2
+	}
+	return 1
+}
+
+// displayWidth is the number of terminal columns s takes up.
+func displayWidth(s string) int {
+	n := 0
+	for _, r := range s {
+		n += runeWidth(r)
+	}
+	return n
+}
+
+// truncate shortens s to at most n terminal columns, marking the cut with
+// an ellipsis.
 func truncate(s string, n int) string {
 	if n <= 0 {
 		return ""
 	}
-	if utf8.RuneCountInString(s) <= n {
+	if displayWidth(s) <= n {
 		return s
 	}
-	runes := []rune(s)
-	return string(runes[:n-1]) + "…"
+	w := 0
+	for i, r := range s {
+		if w += runeWidth(r); w > n-1 {
+			return s[:i] + "…"
+		}
+	}
+	return s
 }
 
-// pad left-aligns s in a field of n runes, truncating if needed.
+// pad left-aligns s in a field of n terminal columns, truncating if needed.
 func pad(s string, n int) string {
 	s = truncate(s, n)
-	if c := utf8.RuneCountInString(s); c < n {
-		s += strings.Repeat(" ", n-c)
+	if w := displayWidth(s); w < n {
+		s += strings.Repeat(" ", n-w)
 	}
 	return s
 }

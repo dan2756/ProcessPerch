@@ -140,6 +140,59 @@ func TestRenderTinyTerminal(t *testing.T) {
 			}
 		}
 	}
+
+	// The too-small frame still covers every row, so nothing from the
+	// previous, larger frame is left on screen.
+	if lines := screen(u, 15, 3); !reflect.DeepEqual(lines, []string{"mtop: terminal…", "", ""}) {
+		t.Errorf("15x3 = %q", lines)
+	}
+	if n := strings.Count(u.render(15, 3), escClearLine); n != 3 {
+		t.Errorf("15x3 frame clears %d lines, want 3", n)
+	}
+}
+
+func TestRenderWideNames(t *testing.T) {
+	const nfd = "Übersicht" // as macOS file names often are
+	u := testUI(t, []Process{
+		{PID: 10, CPU: 3, RSS: 1 << 20, Comm: "/usr/libexec/watchdogd"},
+		{PID: 20, CPU: 2, RSS: 1 << 20, Comm: "/Applications/" + nfd + ".app/Contents/MacOS/" + nfd},
+		{PID: 30, CPU: 1, RSS: 1 << 20, Comm: "/Applications/漢字漢字漢.app/Contents/MacOS/漢字漢字漢"},
+		{PID: 40, CPU: 0, RSS: 1 << 20, Comm: "/Applications/漢字漢字漢字漢字漢字漢字漢字漢字漢字漢字漢字漢.app/Contents/MacOS/x"},
+	})
+	check := func(lines []string, width int) {
+		t.Helper()
+		col := strings.Index(lines[1], "PROCS") + len("PROCS")
+		for i, l := range lines {
+			if w := displayWidth(l); w > width {
+				t.Errorf("line %d is %d columns wide, want at most %d: %q", i, w, width, l)
+			}
+			if i < 2 || i >= len(lines)-1 || l == "" {
+				continue
+			}
+			// The process count ends under the end of PROCS.
+			if displayCol(l, "1 ") != col-1 {
+				t.Errorf("line %d: count not under PROCS: %q", i, l)
+			}
+		}
+	}
+	check(screen(u, 70, 8), 70)
+	press(t, u, "G") // the selected row is padded to the full width
+	check(screen(u, 70, 8), 70)
+	press(t, u, "/漢\r")
+	lines := screen(u, 70, 8)
+	if !strings.HasPrefix(lines[0], "mtop  4 processes in 2 groups") {
+		t.Errorf("title = %q", lines[0])
+	}
+	check(lines, 70)
+}
+
+// displayCol is the terminal column at which sub first appears in s.
+func displayCol(s, sub string) int {
+	i := strings.Index(s, sub)
+	if i < 0 {
+		return -1
+	}
+	return displayWidth(s[:i])
 }
 
 // press feeds raw terminal input to the ui.
@@ -194,10 +247,11 @@ func TestFilter(t *testing.T) {
 		t.Errorf("prompt = %q", last)
 	}
 
-	// Typed letters go to the prompt, not to the key bindings.
-	press(t, u, strings.Repeat("\x7f", 6)+"xq")
-	if u.filter != "xq" {
-		t.Errorf("filter = %q", u.filter)
+	// Typed letters go to the prompt, not to the key bindings, even after
+	// one backspace too many on the empty prompt.
+	press(t, u, strings.Repeat("\x7f", 7)+"xq")
+	if !u.filtering || u.filter != "xq" {
+		t.Errorf("filtering=%v filter=%q", u.filtering, u.filter)
 	}
 	press(t, u, "\x7f\x7fCODE\r")
 	if u.filtering || u.filter != "CODE" {

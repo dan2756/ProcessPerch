@@ -38,6 +38,12 @@ func TestParseFlags(t *testing.T) {
 	if opts, err = parseFlags([]string{"--interval=1500ms"}); err != nil || opts.interval != 1500*time.Millisecond {
 		t.Errorf("--interval=1500ms: %v, %v", opts.interval, err)
 	}
+
+	// Plain seconds are rounded to the nearest nanosecond, not cut off.
+	if opts, err = parseFlags([]string{"-n", "4.1", "--hook-cooldown", "2.01"}); err != nil ||
+		opts.interval != 4100*time.Millisecond || opts.cooldown != 2010*time.Millisecond {
+		t.Errorf("-n 4.1 --hook-cooldown 2.01: %v, %v, %v", opts.interval, opts.cooldown, err)
+	}
 }
 
 func TestParseFlagsErrors(t *testing.T) {
@@ -49,6 +55,10 @@ func TestParseFlagsErrors(t *testing.T) {
 		{"--sort", "pid"},
 		{"--hook", "cpu80:say"},
 		{"--hook-cooldown", "-1s"},
+		{"--hook-cooldown", "1e10"},
+		{"-n", "1e10"},
+		{"-n", "inf"},
+		{"-n", "NaN"},
 		{"--watch"},
 		{"--json", "--watch", "--hook", "cpu>1:true"},
 		{"--bogus"},
@@ -56,6 +66,13 @@ func TestParseFlagsErrors(t *testing.T) {
 	} {
 		if _, err := parseFlags(args); err == nil {
 			t.Errorf("parseFlags(%q) succeeded, want error", args)
+		}
+	}
+
+	// Seconds that overflow a Duration are too large, not negative.
+	for _, args := range [][]string{{"--hook-cooldown", "1e10"}, {"-n", "1e10"}, {"-n", "inf"}} {
+		if _, err := parseFlags(args); err == nil || !strings.Contains(err.Error(), "out of range") {
+			t.Errorf("parseFlags(%q) = %v, want out of range", args, err)
 		}
 	}
 }
