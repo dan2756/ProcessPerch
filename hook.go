@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -201,6 +202,9 @@ func startHook(f firing, stdout, stderr io.Writer, done chan<- hookResult) error
 	cmd.Env = append(os.Environ(), f.env()...)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	// Ctrl-C goes to the foreground process group. A hook that is still
+	// running should not take that signal just because mtop did.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		return err
 	}
