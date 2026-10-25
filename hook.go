@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"strconv"
@@ -67,7 +68,8 @@ func parseHook(spec string) (hook, error) {
 	default:
 		return hook{}, fmt.Errorf("hook %q: unknown metric %q (want cpu, mem or count)", spec, name)
 	}
-	if err != nil || h.threshold < 0 {
+	// NaN slips past "< 0" (NaN < 0 is false) and would never fire.
+	if err != nil || h.threshold < 0 || math.IsNaN(h.threshold) || math.IsInf(h.threshold, 0) {
 		return hook{}, fmt.Errorf("hook %q: bad %s threshold %q", spec, name, value)
 	}
 	return h, nil

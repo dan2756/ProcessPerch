@@ -55,6 +55,11 @@ func TestParseHookErrors(t *testing.T) {
 		"disk>80:say hi",
 		"cpu>lots:say hi",
 		"cpu>-1:say hi",
+		"cpu>NaN:say hi",
+		"cpu>nan:say hi",
+		"cpu>Inf:say hi",
+		"cpu>inf:say hi",
+		"cpu>+Inf:say hi",
 		"mem>2Q:say hi",
 		"count>1.5:say hi",
 	} {
