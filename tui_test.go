@@ -205,6 +205,60 @@ func press(t *testing.T, u *ui, s string) {
 	}
 }
 
+func TestLargeCPUStaysAligned(t *testing.T) {
+	u := testUI(t, []Process{
+		{PID: 10, CPU: 12345.6, RSS: 1023, Comm: "busy"},
+		{PID: 11, CPU: 1.2, RSS: 2048, Comm: "idle"},
+	})
+	check := func(lines []string) {
+		t.Helper()
+		header := lines[1]
+		cpuEnd := displayCol(header, "CPU%") + len("CPU%")
+		memEnd := displayCol(header, "MEM") + len("MEM")
+		if cpuEnd < len("CPU%") || memEnd < len("MEM") {
+			t.Fatalf("header %q", header)
+		}
+		for _, l := range lines[2 : len(lines)-1] {
+			if strings.Contains(l, "12345.6") {
+				if got := displayCol(l, "12345.6") + len("12345.6"); got != cpuEnd {
+					t.Errorf("cpu ends at %d, want %d: %q", got, cpuEnd, l)
+				}
+			}
+			if strings.Contains(l, "1.2") {
+				if got := displayCol(l, "1.2") + len("1.2"); got != cpuEnd {
+					t.Errorf("cpu ends at %d, want %d: %q", got, cpuEnd, l)
+				}
+			}
+			for _, mem := range []string{"1023B", "2.0K"} {
+				if strings.Contains(l, mem) {
+					if got := displayCol(l, mem) + len(mem); got != memEnd {
+						t.Errorf("mem ends at %d, want %d: %q", got, memEnd, l)
+					}
+				}
+			}
+			if w := displayWidth(l); w > 80 {
+				t.Errorf("line is %d wide: %q", w, l)
+			}
+		}
+	}
+	check(screen(u, 80, 8))
+	press(t, u, "\r")
+	check(screen(u, 80, 8))
+
+	// Small values keep the original column widths.
+	small := u.layout(80, []Group{{Name: "a", CPU: 1, Procs: []Process{{CPU: 1}}}})
+	if small.cpuW != cpuW || small.countW != countW {
+		t.Fatalf("small layout cpuW=%d countW=%d", small.cpuW, small.countW)
+	}
+	wide := u.layout(120, []Group{
+		{Name: "busy", CPU: 12345.6, Procs: []Process{{CPU: 12345.6}}},
+		{Name: "many", Procs: make([]Process, 100000)},
+	})
+	if wide.cpuW != 7 || wide.countW != 6 {
+		t.Fatalf("wide layout cpuW=%d countW=%d, want 7 and 6", wide.cpuW, wide.countW)
+	}
+}
+
 func TestExpandGroup(t *testing.T) {
 	u := testUI(t, loadFixture(t, "ps_darwin.txt"))
 	press(t, u, "\r")

@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -320,27 +321,37 @@ const (
 
 type layout struct {
 	width, nameW, pidsW int
+	countW, cpuW        int
 }
 
 // prefixW is the selection marker plus the expand arrow.
 const prefixW = 3
 
 func (u *ui) layout(width int, groups []Group) layout {
-	fixed := prefixW + 1 + countW + 1 + cpuW + 1 + memW + 2
+	// The minimums fit the header and ordinary values (up to 99999
+	// processes and 9999.9% CPU). A wider number has to stay in its
+	// column, so grow it instead of spilling into the next one.
+	// Process CPU is included even when the group is collapsed: expanding
+	// would otherwise shove the columns sideways.
+	cols, cpus := countW, cpuW
 	nameW := 12
 	for _, g := range groups {
+		cols = max(cols, len(strconv.Itoa(len(g.Procs))))
+		cpus = max(cpus, len(strconv.FormatFloat(g.CPU, 'f', 1, 64)))
 		nameW = max(nameW, displayWidth(g.Name))
-		if u.expanded[g.Key] {
-			for _, p := range g.Procs {
+		for _, p := range g.Procs {
+			cpus = max(cpus, len(strconv.FormatFloat(p.CPU, 'f', 1, 64)))
+			if u.expanded[g.Key] {
 				nameW = max(nameW, 2+displayWidth(processName(p.Comm)))
 			}
 		}
 	}
+	fixed := prefixW + 1 + cols + 1 + cpus + 1 + memW + 2
 	nameW = min(nameW, 40)
 	if fixed+nameW > width {
 		nameW = max(4, width-fixed)
 	}
-	return layout{width: width, nameW: nameW, pidsW: max(0, width-fixed-nameW)}
+	return layout{width: width, nameW: nameW, pidsW: max(0, width-fixed-nameW), countW: cols, cpuW: cpus}
 }
 
 // render draws a full frame for a width x height terminal.
@@ -373,7 +384,7 @@ func (u *ui) lines(width, height int) []string {
 	out := make([]string, 0, height)
 	out = append(out, u.titleLine(width, len(vis)))
 	header := fmt.Sprintf("%*s%s %*s %*s %*s  %s", prefixW, "",
-		pad("APP", lay.nameW), countW, "PROCS", cpuW, "CPU%", memW, "MEM", "PIDS")
+		pad("APP", lay.nameW), lay.countW, "PROCS", lay.cpuW, "CPU%", memW, "MEM", "PIDS")
 	out = append(out, escReverse+pad(header, width)+escReset)
 
 	// Body rows: each group, followed by its processes when expanded.
@@ -465,8 +476,8 @@ func (u *ui) groupLine(g *Group, lay layout, selected bool) string {
 	}
 	line := fmt.Sprintf("%s%s %s %*d %*.1f %*s  %s",
 		marker, arrow, pad(g.Name, lay.nameW),
-		countW, len(g.Procs),
-		cpuW, g.CPU,
+		lay.countW, len(g.Procs),
+		lay.cpuW, g.CPU,
 		memW, formatBytes(g.RSS),
 		truncate(joinPIDs(g.PIDs(), " "), lay.pidsW))
 	if selected {
@@ -479,8 +490,8 @@ func (u *ui) groupLine(g *Group, lay layout, selected bool) string {
 func procLine(p *Process, lay layout) string {
 	line := fmt.Sprintf("%*s%s %*s %*.1f %*s  %d",
 		prefixW, "", pad("  "+processName(p.Comm), lay.nameW),
-		countW, "",
-		cpuW, p.CPU,
+		lay.countW, "",
+		lay.cpuW, p.CPU,
 		memW, formatBytes(p.RSS),
 		p.PID)
 	return escDim + truncate(line, lay.width) + escReset
