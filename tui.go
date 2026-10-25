@@ -174,13 +174,17 @@ func (u *ui) selected() *Group {
 }
 
 // moveTo puts the cursor on row i of the visible groups, clamped.
+// An empty list keeps selKey: a filter that matches nothing should not
+// forget the app, so clearing it lands back on the same row. x still
+// does nothing in that state, because selected() only sees visible rows.
 func (u *ui) moveTo(i int) {
 	vis := u.visible()
-	u.cursor = max(0, min(i, len(vis)-1))
-	u.selKey = ""
-	if len(vis) > 0 {
-		u.selKey = vis[u.cursor].Key
+	if len(vis) == 0 {
+		u.cursor = 0
+		return
 	}
+	u.cursor = max(0, min(i, len(vis)-1))
+	u.selKey = vis[u.cursor].Key
 }
 
 // follow keeps the cursor on the same app after the list changes under it
