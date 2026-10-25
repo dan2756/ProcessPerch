@@ -157,8 +157,9 @@ is still over the threshold when the cooldown ends, the hook fires then.
 Apps that are already over a threshold when mtop starts fire on the first
 refresh.
 
-The command runs in the background with `sh -c`, stdin from `/dev/null`, and
-mtop's environment plus:
+The command runs in the background with `sh -c`, in its own process group so
+quitting mtop (including with Ctrl-C) does not signal it, stdin from
+`/dev/null`, and mtop's environment plus:
 
 | Variable | Example |
 | --- | --- |

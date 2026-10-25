@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -248,6 +250,38 @@ func TestStartHookRunsShell(t *testing.T) {
 	}
 	if want := "Google Chrome|93.3|3221225472|2|612 640\n"; string(got) != want {
 		t.Errorf("hook saw %q, want %q", got, want)
+	}
+}
+
+func TestStartHookNewProcessGroup(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "pgid")
+	h := mustHook(t, `cpu>1:ps -o pgid= -p $$ > `+out)
+	done := make(chan hookResult, 1)
+	if err := startHook(firing{hook: &h, group: chrome(5)[0]}, nil, nil, done); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("hook failed: %v", r.err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("hook did not finish")
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pgid, err := strconv.Atoi(strings.TrimSpace(string(got)))
+	if err != nil {
+		t.Fatalf("pgid %q: %v", got, err)
+	}
+	self, err := syscall.Getpgid(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pgid == self {
+		t.Fatalf("hook process group %d is mtop's foreground group", pgid)
 	}
 }
 
