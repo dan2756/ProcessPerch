@@ -278,6 +278,42 @@ func TestFilter(t *testing.T) {
 	}
 }
 
+func TestEmptyFilterKeepsSelection(t *testing.T) {
+	u := testUI(t, loadFixture(t, "ps_darwin.txt"))
+	press(t, u, "jj")
+	want := u.selected()
+	if want == nil {
+		t.Fatal("nothing selected")
+	}
+	key, name := want.Key, want.Name
+
+	// No app name contains '@', including after a refresh.
+	press(t, u, "/@")
+	if n := len(u.visible()); n != 0 {
+		t.Fatalf("visible = %d, want 0", n)
+	}
+	if u.selKey != key {
+		t.Fatalf("selKey = %q, want %q", u.selKey, key)
+	}
+	u.refresh()
+	if u.selKey != key {
+		t.Fatalf("refresh cleared selKey to %q", u.selKey)
+	}
+	var killed bool
+	u.kill = func(int, syscall.Signal) error {
+		killed = true
+		return nil
+	}
+	press(t, u, "x")
+	if killed {
+		t.Fatal("x signalled an app that is not on screen")
+	}
+	press(t, u, "\x1b")
+	if g := u.selected(); g == nil || g.Key != key || g.Name != name {
+		t.Fatalf("after esc, selected %+v, want %s", g, name)
+	}
+}
+
 func TestSortCycle(t *testing.T) {
 	u := testUI(t, loadFixture(t, "ps_darwin.txt"))
 	press(t, u, "s")
