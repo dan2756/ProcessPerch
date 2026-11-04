@@ -17,6 +17,10 @@ func TestParseKeys(t *testing.T) {
 		{"\x1b[5~\x1b[6~", []key{{kind: keyPageUp}, {kind: keyPageDown}}},
 		{"\x1b[H\x1b[4~", []key{{kind: keyHome}, {kind: keyEnd}}},
 		{"\x1b", []key{{kind: keyEsc}}},
+		{"\x1bx", nil}, // Option-x: not Escape, then x
+		{"\x1bX", nil}, // Option-X
+		{"\x1bé", nil}, // Option plus a multibyte rune
+		{"\x1b\x1b[A", []key{{kind: keyEsc}, {kind: keyUp}}},
 		{"\r", []key{{kind: keyEnter}}},
 		{"\x7f", []key{{kind: keyBackspace}}},
 		{"\x03", []key{{kind: keyCtrlC}}},
