@@ -48,7 +48,7 @@ Hooks:
   A hook fires once when an app goes over the threshold and re-arms when it
   drops back under. COMMAND runs with sh -c in its own process group and gets
   MTOP_APP, MTOP_CPU, MTOP_MEM_BYTES, MTOP_COUNT, MTOP_PIDS and MTOP_HOOK in
-  its environment.
+  its environment, replacing any MTOP_* variables already set.
 
 Keys:
   j/k, arrows   move (g/G: top/bottom, PgUp/PgDn: a screen)

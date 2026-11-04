@@ -194,12 +194,28 @@ type hookResult struct {
 	err    error
 }
 
+// hookCommandEnv is the environment a hook command runs with. MTOP_*
+// variables already in the environment are dropped first: macOS getenv
+// returns the first match, so appending alone would let a stale MTOP_APP
+// hide the app that actually fired.
+func hookCommandEnv(extra []string) []string {
+	base := os.Environ()
+	out := make([]string, 0, len(base)+len(extra))
+	for _, kv := range base {
+		if strings.HasPrefix(kv, "MTOP_") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, extra...)
+}
+
 // startHook runs the firing's command with sh -c in the background and
 // reports on done when it exits. The command gets the MTOP_* variables on
 // top of mtop's own environment.
 func startHook(f firing, stdout, stderr io.Writer, done chan<- hookResult) error {
 	cmd := exec.Command("sh", "-c", f.hook.command)
-	cmd.Env = append(os.Environ(), f.env()...)
+	cmd.Env = hookCommandEnv(f.env())
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	// Ctrl-C goes to the foreground process group. A hook that is still
