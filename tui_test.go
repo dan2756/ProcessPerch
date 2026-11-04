@@ -524,3 +524,98 @@ func TestCursorFollowsAppAcrossRefreshes(t *testing.T) {
 		t.Errorf("after Safari quit: %+v at row %d", g, u.cursor)
 	}
 }
+
+func TestPageMovesByAScreen(t *testing.T) {
+	u := testUI(t, loadFixture(t, "ps_darwin.txt"))
+	lines := screen(u, 100, 12)
+	if u.bodyH != 9 {
+		t.Fatalf("bodyH = %d, want 9", u.bodyH)
+	}
+	if !strings.HasPrefix(lines[2], ">▸ Google Chrome") {
+		t.Fatalf("top row = %q", lines[2])
+	}
+
+	press(t, u, "\x1b[6~") // page down
+	lines = screen(u, 100, 12)
+	if u.cursor != 9 || u.offset != 9 {
+		t.Fatalf("after page down: cursor %d offset %d, want 9 and 9", u.cursor, u.offset)
+	}
+	if g := u.selected(); g == nil || g.Name != "gopls" || !strings.Contains(lines[2], "gopls") {
+		t.Fatalf("top row = %q, selected %+v", lines[2], g)
+	}
+	// One row of scroll would have left Docker at the top.
+	if strings.Contains(lines[2], "Docker") {
+		t.Fatalf("page down only moved one row: %q", lines[2])
+	}
+
+	// A refresh must not yank the viewport back.
+	u.refresh()
+	lines = screen(u, 100, 12)
+	if u.offset != 9 || !strings.Contains(lines[2], "gopls") {
+		t.Fatalf("refresh moved the page: offset %d, top %q", u.offset, lines[2])
+	}
+
+	press(t, u, "\x1b[5~") // page up, back to the top row
+	lines = screen(u, 100, 12)
+	if u.cursor != 0 || u.offset != 0 || !strings.Contains(lines[2], "Google Chrome") {
+		t.Fatalf("page up: cursor %d offset %d, top %q", u.cursor, u.offset, lines[2])
+	}
+
+	// From the bottom row of this screen, the next page keeps that row.
+	for range u.bodyH - 1 {
+		press(t, u, "j")
+	}
+	if u.cursor != 8 || u.offset != 0 {
+		t.Fatalf("before paging from the bottom row: cursor %d offset %d", u.cursor, u.offset)
+	}
+	press(t, u, "\x1b[6~")
+	lines = screen(u, 100, 12)
+	if u.cursor != 17 || u.offset != 9 {
+		t.Fatalf("page from the bottom row: cursor %d offset %d, want 17 and 9", u.cursor, u.offset)
+	}
+	if g := u.selected(); g == nil || !strings.Contains(lines[10], g.Name) {
+		t.Errorf("selection not on the bottom row: %q, selected %+v", lines[10], g)
+	}
+}
+
+func TestPageScrollsExpandedGroup(t *testing.T) {
+	procs := []Process{{
+		PID: 2, CPU: 500, RSS: 4096,
+		Comm: "/Applications/Other.app/Contents/MacOS/Other",
+	}}
+	for i := range 20 {
+		procs = append(procs, Process{
+			PID: 100 + i, CPU: float64(20 - i), RSS: 2048,
+			Comm: "/Applications/Big.app/Contents/MacOS/Big",
+		})
+	}
+	u := testUI(t, procs)
+	press(t, u, "j\r") // select Big and expand it
+	screen(u, 80, 12)
+	if g := u.selected(); g == nil || g.Name != "Big" {
+		t.Fatalf("selected %+v, want Big", g)
+	}
+
+	press(t, u, "\x1b[6~")
+	lines := screen(u, 80, 12)
+	if g := u.selected(); g == nil || g.Name != "Big" {
+		t.Fatalf("page left Big: %+v", g)
+	}
+	if strings.Contains(lines[2], "▾") {
+		t.Fatalf("header stayed pinned: %q", lines[2])
+	}
+	if !strings.HasPrefix(lines[2], ">") || !strings.Contains(lines[2], "107") {
+		t.Errorf("first visible process = %q, want selected pid 107", lines[2])
+	}
+
+	// Up reveals the app row again; another Up leaves it for the app above.
+	press(t, u, "k")
+	lines = screen(u, 80, 12)
+	if g := u.selected(); g == nil || g.Name != "Big" || !strings.Contains(lines[2], "▾") {
+		t.Fatalf("k did not reveal Big: %q, selected %+v", lines[2], g)
+	}
+	press(t, u, "k")
+	if g := u.selected(); g == nil || g.Name != "Other" {
+		t.Fatalf("k after the header selected %+v, want Other", g)
+	}
+}
