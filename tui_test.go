@@ -525,6 +525,31 @@ func TestCursorFollowsAppAcrossRefreshes(t *testing.T) {
 	}
 }
 
+func TestAltXDoesNotKill(t *testing.T) {
+	u := testUI(t, loadFixture(t, "ps_darwin.txt"))
+	var killed bool
+	u.kill = func(int, syscall.Signal) error {
+		killed = true
+		return nil
+	}
+	press(t, u, "\x1bx\x1bX")
+	if killed {
+		t.Fatal("option-x signalled the selected app")
+	}
+	if u.filter != "" || u.filtering {
+		t.Fatalf("option-x edited the filter: filtering=%v filter=%q", u.filtering, u.filter)
+	}
+
+	press(t, u, "/chrome")
+	press(t, u, "\x1bx")
+	if !u.filtering || u.filter != "chrome" {
+		t.Fatalf("option-x while filtering: filtering=%v filter=%q", u.filtering, u.filter)
+	}
+	if killed {
+		t.Fatal("option-x while filtering signalled the selected app")
+	}
+}
+
 func TestPageMovesByAScreen(t *testing.T) {
 	u := testUI(t, loadFixture(t, "ps_darwin.txt"))
 	lines := screen(u, 100, 12)

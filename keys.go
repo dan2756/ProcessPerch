@@ -43,7 +43,9 @@ func readKeys(r io.Reader, keys chan<- key) {
 
 // parseKeys decodes one read's worth of raw terminal input. Terminals send
 // an escape sequence in a single write, so a lone ESC byte at the end of a
-// read is the Escape key itself.
+// read is the Escape key itself. ESC followed by an ordinary character is
+// Alt (Option on macOS): Option-x arrives as ESC x, and treating that as
+// Escape and then x would SIGTERM the selected app.
 func parseKeys(b []byte) []key {
 	var keys []key
 	for len(b) > 0 {
@@ -62,6 +64,12 @@ func parseKeys(b []byte) []key {
 				keys = append(keys, key{kind: k})
 			}
 			b = b[i+1:]
+		case c == 0x1b && len(b) > 1 && b[1] != 0x1b:
+			_, size := utf8.DecodeRune(b[1:])
+			if size <= 0 {
+				size = 1
+			}
+			b = b[1+size:]
 		case c == 0x1b:
 			keys = append(keys, key{kind: keyEsc})
 			b = b[1:]
