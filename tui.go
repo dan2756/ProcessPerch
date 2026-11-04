@@ -222,15 +222,18 @@ func (u *ui) handleKey(k key) (quit bool) {
 		u.filter = ""
 		u.follow()
 	case keyUp:
-		u.moveTo(u.cursor - 1)
+		if !u.revealSelectedHeader() {
+			u.moveTo(u.cursor - 1)
+		}
 	case keyDown:
 		u.moveTo(u.cursor + 1)
 	case keyPageUp:
-		u.moveTo(u.cursor - u.bodyH)
+		u.page(-1)
 	case keyPageDown:
-		u.moveTo(u.cursor + u.bodyH)
+		u.page(1)
 	case keyHome:
 		u.moveTo(0)
+		u.offset = 0
 	case keyEnd:
 		u.moveTo(len(u.visible()) - 1)
 	case keyRune:
@@ -240,9 +243,12 @@ func (u *ui) handleKey(k key) (quit bool) {
 		case 'j':
 			u.moveTo(u.cursor + 1)
 		case 'k':
-			u.moveTo(u.cursor - 1)
+			if !u.revealSelectedHeader() {
+				u.moveTo(u.cursor - 1)
+			}
 		case 'g':
 			u.moveTo(0)
+			u.offset = 0
 		case 'G':
 			u.moveTo(len(u.visible()) - 1)
 		case 'e':
@@ -409,9 +415,22 @@ func (u *ui) lines(width, height int) []string {
 
 	u.bodyH = height - 3
 	u.scrollTo(cursorRow)
+	if maxOff := len(rows) - u.bodyH; u.offset > maxOff {
+		if maxOff < 0 {
+			maxOff = 0
+		}
+		u.offset = maxOff
+	}
+	selKey := ""
+	if g := u.selected(); g != nil {
+		selKey = g.Key
+	}
 	for i := u.offset; i < len(rows) && i < u.offset+u.bodyH; i++ {
 		if r := rows[i]; r.p != nil {
-			out = append(out, procLine(r.p, lay))
+			// The header has scrolled off; keep a cursor on the first
+			// visible process of the app it belongs to.
+			standIn := cursorRow < u.offset && i == u.offset && r.g.Key == selKey
+			out = append(out, procLine(r.p, lay, standIn))
 		} else {
 			out = append(out, u.groupLine(r.g, lay, i == cursorRow))
 		}
@@ -432,7 +451,114 @@ func (u *ui) lines(width, height int) []string {
 	return out
 }
 
+// visualSpans is the body row where each visible group starts, plus the
+// total number of body rows. An expanded group occupies one row for the
+// header and one more for each process.
+func (u *ui) visualSpans(vis []Group) (starts []int, total int) {
+	starts = make([]int, len(vis))
+	row := 0
+	for i, g := range vis {
+		starts[i] = row
+		row++
+		if u.expanded[g.Key] {
+			row += len(g.Procs)
+		}
+	}
+	return starts, row
+}
+
+// page scrolls the viewport by one screen and keeps the selection on the
+// same row of that screen. Moving the cursor by bodyH groups and letting
+// scrollTo do the minimum nudge only reveals a single new row.
+func (u *ui) page(dir int) {
+	vis := u.visible()
+	starts, total := u.visualSpans(vis)
+	if total == 0 {
+		return
+	}
+	step := u.bodyH
+	if step < 1 {
+		step = 1
+	}
+	cur := 0
+	if u.cursor >= 0 && u.cursor < len(starts) {
+		cur = starts[u.cursor]
+	}
+	// Paged into an expansion: the header is above the viewport, and the
+	// top row on screen is the selection for the purpose of paging.
+	if cur < u.offset {
+		cur = u.offset
+	}
+	rel := cur - u.offset
+	if rel >= step {
+		rel = step - 1
+	}
+	if rel < 0 {
+		rel = 0
+	}
+	off := u.offset + dir*step
+	if off < 0 {
+		off = 0
+	}
+	if maxOff := total - step; off > maxOff {
+		if maxOff < 0 {
+			maxOff = 0
+		}
+		off = maxOff
+	}
+	target := off + rel
+	if target >= total {
+		target = total - 1
+	}
+	u.offset = off
+	u.moveTo(groupAt(starts, target))
+}
+
+// groupAt is the group whose block contains visual row.
+func groupAt(starts []int, row int) int {
+	idx := 0
+	for i, start := range starts {
+		if start > row {
+			break
+		}
+		idx = i
+	}
+	return idx
+}
+
+// revealSelectedHeader brings the selected app's own row back on screen
+// after paging through its processes. It reports whether the header was
+// above the viewport.
+func (u *ui) revealSelectedHeader() bool {
+	vis := u.visible()
+	starts, _ := u.visualSpans(vis)
+	if u.cursor < 0 || u.cursor >= len(starts) {
+		return false
+	}
+	if starts[u.cursor] >= u.offset {
+		return false
+	}
+	u.offset = starts[u.cursor]
+	return true
+}
+
 func (u *ui) scrollTo(row int) {
+	if u.bodyH < 1 {
+		u.bodyH = 1
+	}
+	// Keep a viewport that is already showing this group, including the
+	// processes under an expanded app. Pulling back to the header would
+	// undo Page Down as soon as the next refresh drew a frame.
+	end := row + 1
+	if g := u.selected(); g != nil && u.expanded[g.Key] {
+		end += len(g.Procs)
+	}
+	if end > u.offset && row < u.offset+u.bodyH {
+		if u.offset < 0 {
+			u.offset = 0
+		}
+		return
+	}
 	if row < u.offset {
 		u.offset = row
 	}
@@ -486,14 +612,22 @@ func (u *ui) groupLine(g *Group, lay layout, selected bool) string {
 	return truncate(line, lay.width)
 }
 
-// procLine is one process under an expanded group.
-func procLine(p *Process, lay layout) string {
-	line := fmt.Sprintf("%*s%s %*s %*.1f %*s  %d",
-		prefixW, "", pad("  "+processName(p.Comm), lay.nameW),
+// procLine is one process under an expanded group. selected is set when
+// this row stands in for the group header, which has scrolled off screen.
+func procLine(p *Process, lay layout, selected bool) string {
+	marker := " "
+	if selected {
+		marker = ">"
+	}
+	line := fmt.Sprintf("%s%*s%s %*s %*.1f %*s  %d",
+		marker, prefixW-1, "", pad("  "+processName(p.Comm), lay.nameW),
 		lay.countW, "",
 		lay.cpuW, p.CPU,
 		memW, formatBytes(p.RSS),
 		p.PID)
+	if selected {
+		return escReverse + pad(line, lay.width) + escReset
+	}
 	return escDim + truncate(line, lay.width) + escReset
 }
 

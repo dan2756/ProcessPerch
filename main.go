@@ -51,7 +51,7 @@ Hooks:
   its environment.
 
 Keys:
-  j/k, arrows   move (g/G: top/bottom, PgUp/PgDn: page)
+  j/k, arrows   move (g/G: top/bottom, PgUp/PgDn: a screen)
   enter, e      expand/collapse the selected app
   x             SIGTERM every process of the selected app
   X             SIGKILL every process of the selected app

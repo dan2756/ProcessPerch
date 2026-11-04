@@ -75,7 +75,7 @@ Flags take one or two dashes, and `--top=5` works as well as `--top 5`.
 | Key | Action |
 | --- | --- |
 | `j` / `k`, arrows | move the cursor |
-| `g` / `G`, PgUp / PgDn | jump to top / bottom, page |
+| `g` / `G`, PgUp / PgDn | jump to the top or bottom, or scroll by a screen |
 | `enter`, `e` | expand or collapse the selected app to show its processes |
 | `x` | send SIGTERM to every process of the selected app |
 | `X` | send SIGKILL to every process of the selected app |
@@ -90,6 +90,10 @@ plus any processes that had already exited or could not be signalled
 
 The cursor sticks to the app, not to the row: when a refresh reorders the
 list, the selection moves with the app, so `x` hits what you selected.
+
+Page Up and Page Down move by a whole screen, keeping the selection on the
+same row of that screen. When an expanded app has more processes than fit,
+they scroll through those processes; `k` or Up brings the app's own row back.
 
 **Safety:** PID 0 (`kernel_task`), PID 1 (`launchd`/`init`) and mtop itself
 are never signalled, even when they are part of the selected group.
