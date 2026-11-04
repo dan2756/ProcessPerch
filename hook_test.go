@@ -227,6 +227,59 @@ func TestFiringEnv(t *testing.T) {
 	}
 }
 
+func TestHookCommandEnvOverridesStale(t *testing.T) {
+	t.Setenv("MTOP_APP", "stale")
+	t.Setenv("MTOP_PIDS", "9")
+	t.Setenv("MTOP_NOT_OURS", "x")
+	env := hookCommandEnv([]string{
+		"MTOP_APP=Google Chrome",
+		"MTOP_PIDS=612 640",
+	})
+	var got []string
+	var pathSeen bool
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "MTOP_") {
+			got = append(got, kv)
+		}
+		if strings.HasPrefix(kv, "PATH=") {
+			pathSeen = true
+		}
+	}
+	want := []string{"MTOP_APP=Google Chrome", "MTOP_PIDS=612 640"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("MTOP_* = %q, want %q", got, want)
+	}
+	if !pathSeen {
+		t.Fatal("PATH was dropped from the hook environment")
+	}
+}
+
+func TestStartHookOverridesStaleEnv(t *testing.T) {
+	t.Setenv("MTOP_APP", "stale")
+	t.Setenv("MTOP_PIDS", "9")
+	out := filepath.Join(t.TempDir(), "out")
+	h := mustHook(t, `cpu>1:printf '%s %s\n' "$MTOP_APP" "$MTOP_PIDS" > `+out)
+	done := make(chan hookResult, 1)
+	if err := startHook(firing{hook: &h, group: chrome(5)[0]}, nil, nil, done); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("hook failed: %v", r.err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("hook did not finish")
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "Google Chrome 612 640\n"; string(got) != want {
+		t.Errorf("hook saw %q, want %q", got, want)
+	}
+}
+
 func TestStartHookRunsShell(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "env.txt")
 	h := mustHook(t, `cpu>80:printf '%s|%s|%s|%s|%s\n' "$MTOP_APP" "$MTOP_CPU" "$MTOP_MEM_BYTES" "$MTOP_COUNT" "$MTOP_PIDS" > `+out)

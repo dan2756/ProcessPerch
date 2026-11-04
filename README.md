@@ -163,7 +163,8 @@ refresh.
 
 The command runs in the background with `sh -c`, in its own process group so
 quitting mtop (including with Ctrl-C) does not signal it, stdin from
-`/dev/null`, and mtop's environment plus:
+`/dev/null`, and mtop's environment. Any `MTOP_*` variables already set are
+replaced, so a stale value cannot hide the app that fired:
 
 | Variable | Example |
 | --- | --- |
