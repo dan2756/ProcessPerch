@@ -116,6 +116,12 @@ func TestParsePSLineErrors(t *testing.T) {
 		"x 0 0.0 100 foo",
 		"1 y 0.0 100 foo",
 		"1 0 abc 100 foo",
+		"1 0 NaN 100 foo",
+		"1 0 nan 100 foo",
+		"1 0 Inf 100 foo",
+		"1 0 +Inf 100 foo",
+		"1 0 Infinity 100 foo",
+		"1 0 -Inf 100 foo",
 		"1 0 0.0 -5 foo",
 		"-1 0 0.0 5 foo",
 	} {
@@ -136,6 +142,22 @@ func TestParsePSSkipsHeaderAndJunk(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(procs) != 2 || procs[1].Comm != "/usr/libexec/logd" {
+		t.Fatalf("got %+v", procs)
+	}
+}
+
+func TestParsePSSkipsNonFiniteCPU(t *testing.T) {
+	// A non-finite %CPU must be dropped like any other bad line. Keeping it
+	// would make the group total NaN and --json fail for every other process.
+	in := "1 0 NaN 100 bad\n" +
+		"2 0 1.5 200 /bin/good\n" +
+		"3 0 +Inf 100 worse\n" +
+		"4 0 Infinity 100 also\n"
+	procs, err := parsePS(strings.NewReader(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(procs) != 1 || procs[0].PID != 2 || procs[0].Comm != "/bin/good" || procs[0].CPU != 1.5 {
 		t.Fatalf("got %+v", procs)
 	}
 }
