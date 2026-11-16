@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -43,6 +44,31 @@ func TestAppBundle(t *testing.T) {
 		if bundle, name, ok := appBundle(comm); ok {
 			t.Errorf("appBundle(%q) = %q, %q; want no bundle", comm, bundle, name)
 		}
+	}
+}
+
+func TestGroupNameStripsTerminalControls(t *testing.T) {
+	comm := "/Applications/Bad\x1b]0;pwned\x07.app/Contents/MacOS/Helper\x1b[2J"
+	groups := groupProcesses([]Process{
+		{PID: 10, CPU: 1, RSS: 1024, Comm: comm},
+		{PID: 11, Comm: "zsh\u202E"},
+	})
+	app := findGroup(groups, "Bad?]0;pwned?")
+	if app == nil {
+		t.Fatalf("groups = %v", groupNames(groups))
+	}
+	if app.Key != "/Applications/Bad\x1b]0;pwned\x07.app" {
+		t.Errorf("key = %q", app.Key)
+	}
+	if app.Bundle != "/Applications/Bad?]0;pwned?.app" || strings.Contains(app.Bundle, "\x1b") {
+		t.Errorf("bundle = %q", app.Bundle)
+	}
+	if got := visibleProcessName(comm); got != "Helper?[2J" {
+		t.Errorf("child name = %q", got)
+	}
+	sh := findGroup(groups, "zsh?")
+	if sh == nil || sh.Key != "zsh\u202E" {
+		t.Fatalf("shell group = %+v", sh)
 	}
 }
 

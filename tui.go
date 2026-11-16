@@ -348,7 +348,7 @@ func (u *ui) layout(width int, groups []Group) layout {
 		for _, p := range g.Procs {
 			cpus = max(cpus, len(strconv.FormatFloat(p.CPU, 'f', 1, 64)))
 			if u.expanded[g.Key] {
-				nameW = max(nameW, 2+displayWidth(processName(p.Comm)))
+				nameW = max(nameW, 2+displayWidth(visibleProcessName(p.Comm)))
 			}
 		}
 	}
@@ -620,7 +620,7 @@ func procLine(p *Process, lay layout, selected bool) string {
 		marker = ">"
 	}
 	line := fmt.Sprintf("%s%*s%s %*s %*.1f %*s  %d",
-		marker, prefixW-1, "", pad("  "+processName(p.Comm), lay.nameW),
+		marker, prefixW-1, "", pad("  "+visibleProcessName(p.Comm), lay.nameW),
 		lay.countW, "",
 		lay.cpuW, p.CPU,
 		memW, formatBytes(p.RSS),
