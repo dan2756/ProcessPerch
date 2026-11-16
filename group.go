@@ -56,10 +56,13 @@ func groupProcesses(procs []Process) []Group {
 // ps comm value.
 func classify(comm string) (key, name, bundle string) {
 	if b, n, ok := appBundle(comm); ok {
-		return b, n, b
+		// Key stays the raw path so two bundles that differ only by a
+		// control character stay two groups. Name and bundle are what
+		// get printed and handed to hooks.
+		return b, sanitizeTerm(n), sanitizeTerm(b)
 	}
 	n := processName(comm)
-	return n, n, ""
+	return n, sanitizeTerm(n), ""
 }
 
 // appBundle finds the outermost .app bundle in an executable path.
@@ -100,6 +103,12 @@ func processName(comm string) string {
 		name = name[1:]
 	}
 	return name
+}
+
+// visibleProcessName is the process name as shown under an expanded app.
+// The grouping key keeps the raw name; this is only the text on screen.
+func visibleProcessName(comm string) string {
+	return sanitizeTerm(processName(comm))
 }
 
 // sortProcs orders a group's processes busiest first.

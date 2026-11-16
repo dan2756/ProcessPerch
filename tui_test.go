@@ -131,6 +131,36 @@ func TestSnapshotErrorKeepsLastGroups(t *testing.T) {
 	}
 }
 
+func TestRenderStripsTerminalControls(t *testing.T) {
+	const injected = "\x1b]0;pwned\x07"
+	u := testUI(t, []Process{
+		{PID: 10, CPU: 5, RSS: 4096, Comm: "/Applications/Bad" + injected + ".app/Contents/MacOS/Bad"},
+		{PID: 12, CPU: 4, RSS: 2048, Comm: "/Applications/Bad" + injected + ".app/Contents/MacOS/Helper\x1b[2J"},
+	})
+	raw := u.render(80, 16)
+	if strings.Contains(raw, "\x1b]0;pwned") || strings.Contains(raw, "\x1b[2J") || strings.Contains(raw, "\x07") {
+		t.Fatalf("control characters leaked into the frame: %q", raw)
+	}
+	lines := screen(u, 80, 16)
+	if !strings.Contains(lines[2], "Bad?]0;pwned?") {
+		t.Fatalf("group row = %q", lines[2])
+	}
+	for i, l := range lines {
+		if w := displayWidth(l); w > 80 {
+			t.Errorf("line %d is %d wide: %q", i, w, l)
+		}
+	}
+	press(t, u, "\r")
+	raw = u.render(80, 16)
+	if strings.Contains(raw, "\x1b]0;pwned") || strings.Contains(raw, "\x1b[2J") || strings.Contains(raw, "\x07") {
+		t.Fatalf("expanded frame leaked controls: %q", raw)
+	}
+	expanded := screen(u, 80, 16)
+	if !strings.Contains(expanded[4], "Helper?[2J") {
+		t.Errorf("child row = %q", expanded[4])
+	}
+}
+
 func TestRenderTinyTerminal(t *testing.T) {
 	u := testUI(t, loadFixture(t, "ps_linux.txt"))
 	for _, size := range [][2]int{{10, 3}, {20, 4}, {30, 5}} {

@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // formatBytes renders a byte count in short binary units: 512K, 14M, 1.2G.
@@ -90,6 +91,49 @@ var wide = &unicode.RangeTable{
 		{0x20000, 0x2fffd, 1},
 		{0x30000, 0x3fffd, 1},
 	},
+}
+
+// sanitizeTerm replaces characters that are unsafe to write to a terminal.
+// A comm value is a filename, so it may contain an escape, another control,
+// a line separator, or a bidi override. Printed raw, the escape redraws the
+// screen and the override spoofs which app a key will signal. Invalid UTF-8
+// is replaced too: a raw 0x9B byte is a C1 control on some terminals.
+// A genuine U+FFFD is kept; only a bad byte becomes "?".
+func sanitizeTerm(s string) string {
+	var b strings.Builder
+	dirty := false
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if (r == utf8.RuneError && size == 1) || unsafeTermRune(r) {
+			if !dirty {
+				b.Grow(len(s))
+				b.WriteString(s[:i])
+				dirty = true
+			}
+			b.WriteByte('?')
+		} else if dirty {
+			b.WriteString(s[i : i+size])
+		}
+		i += size
+	}
+	if !dirty {
+		return s
+	}
+	return b.String()
+}
+
+func unsafeTermRune(r rune) bool {
+	if unicode.IsControl(r) {
+		return true
+	}
+	switch r {
+	case '\u061C', '\u200E', '\u200F',
+		'\u2028', '\u2029',
+		'\u202A', '\u202B', '\u202C', '\u202D', '\u202E',
+		'\u2066', '\u2067', '\u2068', '\u2069':
+		return true
+	}
+	return false
 }
 
 // runeWidth is the number of terminal columns r takes up. Combining marks

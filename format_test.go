@@ -79,6 +79,27 @@ func TestWideAndCombiningWidth(t *testing.T) {
 	}
 }
 
+func TestSanitizeTerm(t *testing.T) {
+	const nfd = "Übersicht" // Übersicht with a combining diaeresis
+	tests := map[string]string{
+		"Google Chrome":       "Google Chrome",
+		nfd:                   nfd,
+		"漢字":                  "漢字",
+		"Bad\x1b]0;pwned\x07": "Bad?]0;pwned?",
+		"a\u202Ebc":           "a?bc",
+		"a\u061Cbc":           "a?bc",
+		"line\u2028break":     "line?break",
+		"ok\xffbad":           "ok?bad",
+		"keep\uFFFD":          "keep\uFFFD",
+		"a\u200Db":            "a\u200Db", // ZWJ joins emoji; it is not a bidi control
+	}
+	for in, want := range tests {
+		if got := sanitizeTerm(in); got != want {
+			t.Errorf("sanitizeTerm(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestJoinPIDs(t *testing.T) {
 	if got := joinPIDs([]int{612, 640, 641}, " "); got != "612 640 641" {
 		t.Errorf("joinPIDs = %q", got)
