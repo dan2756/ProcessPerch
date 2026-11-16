@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"strconv"
@@ -153,9 +154,11 @@ func parsePSLine(line string) (Process, error) {
 		return Process{}, fmt.Errorf("bad ppid %q", fields[1])
 	}
 	// Accept a decimal comma too, in case ps ignored LC_NUMERIC or the
-	// output was captured elsewhere.
+	// output was captured elsewhere. NaN slips past "< 0" (NaN < 0 is
+	// false) and +Inf parses with a nil error; either poisons the group
+	// total and makes --json reject the whole snapshot.
 	cpu, err := strconv.ParseFloat(strings.Replace(fields[2], ",", ".", 1), 64)
-	if err != nil || cpu < 0 {
+	if err != nil || cpu < 0 || math.IsNaN(cpu) || math.IsInf(cpu, 0) {
 		return Process{}, fmt.Errorf("bad %%cpu %q", fields[2])
 	}
 	rss, err := strconv.ParseUint(fields[3], 10, 64)
